@@ -1,2 +1,129 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+###############################################
+#            Daniel Gonález © 2017             #
+#         Environmental data pre-run           #
+###############################################
+
+#library require to run before 
+library(sp)
+library(rgdal)
+library(rgeos)
+library(maptools)
+library(raster)
+library(ggplot2)
+library(scales)
+library(gridExtra)
+library(adehabitatHR)
+library(adehabitatHS)
+library(maptools)
+library(marmap)
+library(maptools)
+library(lattice)
+library (trip)
+library(rworldmap)
+library(rworldxtra)
+data(countriesHigh)
+library(geosphere)
+library(magrittr)
+library(dplyr)
+library(chron)
+library(lubridate)
+library(xlsx)
+
+#Load  .csv file
+gentoo = read.csv("/Users/danielgonzalez/Desktop/Thesis/GENTOO DATA/Regularised Gentoos.csv")
+
+#add colony information
+colony<-read.csv("/Users/danielgonzalez/Desktop/Thesis/GENTOO DATA/Gentoo rookeries.csv")
+
+# # # # # # # #
+#Instead I will upload another shp file with high resolution
+plot(countriesHigh, xlim = c(-65, -52), ylim = c(-56, -47),)
+
+#Load in world shape from rworldmap and force to same CRS
+CP <- as(extent(-65, -52, -56, -47), "SpatialPolygons")
+
+proj4string(CP) <- sp::CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs")
+proj4string(countriesHigh) <- sp::CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs")
+world_shp <- gIntersection(countriesHigh, CP, byid=T, drop_lower_td = T)
+
+#Project to UTM  Falkland Islands zone=21 +south
+utmCRS = CRS("+proj=utm +zone=21 +south +datum=WGS84 +units=m +no_defs") 
+world_utm = spTransform(world_shp, utmCRS)
+
+# # # # # # #
+
+#Create a spatial points dataframe
+locs = sp::SpatialPointsDataFrame(coords = cbind(gentoo$lon, gentoo$lat), data = gentoo, proj4string=CRS("+proj=longlat +datum=WGS84"))
+
+#Load in Raster data
+#This is 1 min resolution bathymetry from ETOPO1 database hosted on the NOAA website
+bathy = raster::raster("/Users/danielgonzalez/bathy.asc")
+
+#Define projection of bathymetry data
+raster::projection(bathy) = CRS("+proj=longlat +datum=WGS84")#same projections than locs above
+#extract depth values to locations
+gentoo$bathy=raster::extract(bathy,locs)
+
+#Define projection of bathymetry data
+raster::projection(bathy) = CRS("+proj=longlat +datum=WGS84")#same projections than locs above
+
+#Plot to check BATYMETRY DATA AROUND FALKLAND ISLAND
+plot(bathy)
+points (locs)
+
+
+#Alternatively project to local projection--> Define UTP projection, more infor at https://epsg.io
+#Change the projection to UTM ZONE 21 SOUTH-->CRS-->Coordinate Reference
+
+FalklandCRS = CRS("+proj=utm +zone=21 +south +datum=WGS84 +units=m +no_defs") 
+#FALKLAND ISLANDS IT´S AT UTM ZONE 21 SOUTH
+
+#Project locs in utm in Falkland
+locs_utm = sp::spTransform(locs, FalklandCRS)
+
+#Project raster, optionally change resolution  res = 2000
+bathy_utm = raster::projectRaster(bathy, crs = FalklandCRS)
+#Extract depth values to locations
+gentoo$bathy2 = raster::extract(bathy_utm, locs_utm) 
+#Plot to check
+plot(bathy_utm)  #bathymetry map with utm coordinates
+lines(world_utm)
+points(locs_utm)
+
+#Create a raster grid over which to calculate distances
+# ras = raster(xmn = 0, xmx = 500000, ymn = 4000000, ymx = 4500000, resolution = 1000)   #MEASURE BY JAMES 
+#increase the area to have al values
+ras = raster(xmn = -200000, xmx = 600000, ymn = 4000000, ymx = 4900000, resolution = 1000) # INCREASE THE AREA BUT STILL WARNING MESSAGE THAT SOME INDICES ARE INVALID OR NA RETURNED!!!
+
+
+crs(ras) <- crs(world_utm)
+
+#Rasterize shapefile
+worldmask <- rasterize(world_utm, ras)
+#Set land to "1" and sea to NA
+worldras <- !is.na(worldmask) #set 1 is land and sea values of NA.
+worldras[worldras==0] <- NA
+
+plot(worldras)
+lines(world_utm)
+# points(locs_utm)
+
+
+#Calculate distance
+distRas <- raster::distance(worldras)  #RASTER LAYER
+distRas
+
+#Plot to check
+plot(distRas/1000)
+lines(world_utm)
+points(locs_utm)
+#can´t show the points of the penguins
+dev.off()
+#Output raster
+writeRaster(distRas, "~/Distance to coast")
+
+gentoo$distancetocoast = extract(distRas, locs_utm)
+
+
+
+
